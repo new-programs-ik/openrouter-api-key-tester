@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+/* Theme modelled on interviewkickstart.com: white surfaces, slate-navy text,
+   bright blue accents. Light only, like the reference site. */
+@theme inline {
+  --font-sans: var(--font-inter);
+  --font-heading: var(--font-jakarta);
+  --font-mono: var(--font-geist-mono);
+
+  --color-ink: #324158;
+  --color-muted: #475467;
+  --color-subtle: #667085;
+  --color-line: #e4e7ec;
+  --color-line-strong: #d0d5dd;
+  --color-soft: #f2f9ff;
+  --color-brand: #009bec;
+  --color-brand-mid: #2f8ff5;
+  --color-brand-strong: #005eff;
+  --color-brand-tint: #e2f3ff;
+  --color-brand-tint-strong: #d0ebff;
+
+  --shadow-card: 0 10px 30px rgba(0, 94, 255, 0.08);
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: #ffffff;
+  color: var(--color-ink);
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+}
