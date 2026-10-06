@@ -8,6 +8,20 @@ export const MAX_PROMPT_LENGTH = 200;
 export const MAX_TOKENS = 50;
 export const UPSTREAM_TIMEOUT_MS = 30_000;
 
+/** What a model does, which decides the endpoint a test call goes to. */
+export type ModelKind = "chat" | "embedding" | "transcription";
+export const MODEL_KINDS: readonly ModelKind[] = ["chat", "embedding", "transcription"];
+
+export function isModelKind(value: unknown): value is ModelKind {
+  return MODEL_KINDS.includes(value as ModelKind);
+}
+
+// Transcription test calls send this bundled clip (public/sample-audio.wav)
+// instead of the prompt.
+export const SAMPLE_AUDIO_URL = "/sample-audio.wav";
+export const SAMPLE_AUDIO_TEXT = "Hello! This is a test of my OpenRouter key.";
+export const SAMPLE_AUDIO_SECONDS = 4;
+
 export const MESSAGES = {
   emptyKey: "Please paste your OpenRouter API key first.",
   badFormat:
@@ -83,19 +97,27 @@ export type KeyInfo = {
 export type CheckKeyResponse = { ok: true; key: KeyInfo } | ApiError;
 
 export type TestCallResult = {
+  kind: ModelKind;
   model: string;
+  /** Chat reply or transcript; empty for embeddings. */
   reply: string;
   finishReason: string | null;
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
   cost: number | null;
+  /** Embeddings only: vector length and its first few values. */
+  dimensions: number | null;
+  vectorPreview: number[] | null;
+  /** Transcription only: audio length OpenRouter billed for. */
+  audioSeconds: number | null;
 };
 
 export type TestCallResponse = { ok: true; result: TestCallResult } | ApiError;
 
 export type ModelInfo = {
   id: string;
+  kind: ModelKind;
   name: string;
   /** USD per token; multiply by 1,000,000 for the usual "per 1M" price. */
   promptPrice: number;

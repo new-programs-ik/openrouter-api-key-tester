@@ -7,9 +7,11 @@ import {
   MESSAGES,
   OPENROUTER_BASE,
   UPSTREAM_TIMEOUT_MS,
+  MODEL_KINDS,
   messageForStatus,
   validateKeyFormat,
   type ModelInfo,
+  type ModelKind,
   type ModelsResponse,
 } from "@/lib/openrouter";
 import { getClientIp, rateLimit } from "@/lib/rate-limit";
@@ -23,6 +25,18 @@ function json(body: ModelsResponse, status: number, headers?: HeadersInit) {
 
 function fail(status: number, error: string = messageForStatus(status)) {
   return json({ ok: false, status, error }, status);
+}
+
+// OpenRouter only lists text models unless other output modalities are asked
+// for. These are the ones a test call knows how to exercise.
+const OUTPUT_MODALITIES = "text,embeddings,transcription";
+
+function kindOf(outputs: unknown): ModelKind | null {
+  if (!Array.isArray(outputs)) return "chat";
+  if (outputs.includes("embeddings")) return "embedding";
+  if (outputs.includes("transcription")) return "transcription";
+  if (outputs.includes("text")) return "chat";
+  return null;
 }
 
 function price(value: unknown): number {
@@ -53,11 +67,14 @@ export async function POST(request: Request) {
   // account's provider preferences, privacy settings and guardrails.
   let upstream: Response;
   try {
-    upstream = await fetch(`${OPENROUTER_BASE}/models/user`, {
-      headers: { Authorization: `Bearer ${key}` },
-      cache: "no-store",
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-    });
+    upstream = await fetch(
+      `${OPENROUTER_BASE}/models/user?output_modalities=${OUTPUT_MODALITIES}`,
+      {
+        headers: { Authorization: `Bearer ${key}` },
+        cache: "no-store",
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      },
+    );
   } catch {
     // Deliberately not logging the error: it must never carry the key.
     return fail(502, MESSAGES.upstreamUnreachable);
@@ -75,8 +92,8 @@ export async function POST(request: Request) {
   const models: ModelInfo[] = [];
   for (const m of payload.data) {
     if (typeof m?.id !== "string") continue;
-    const outputs = m.architecture?.output_modalities;
-    if (Array.isArray(outputs) && !outputs.includes("text")) continue;
+    const kind = kindOf(m.architecture?.output_modalities);
+    if (!kind) continue;
 
     const promptPrice = price(m.pricing?.prompt);
     const completionPrice = price(m.pricing?.completion);
@@ -86,6 +103,7 @@ export async function POST(request: Request) {
 
     models.push({
       id: m.id,
+      kind,
       name: typeof m.name === "string" ? m.name : m.id,
       promptPrice,
       completionPrice,
@@ -96,9 +114,11 @@ export async function POST(request: Request) {
 
   if (models.length === 0) return fail(502, MESSAGES.noModels);
 
-  // Cheapest first, so learners naturally test with an inexpensive model.
+  // Grouped by kind (prices aren't comparable across kinds), then cheapest
+  // first, so learners naturally test with an inexpensive model.
   models.sort(
     (a, b) =>
+      MODEL_KINDS.indexOf(a.kind) - MODEL_KINDS.indexOf(b.kind) ||
       a.promptPrice + a.completionPrice - (b.promptPrice + b.completionPrice) ||
       a.name.localeCompare(b.name),
   );

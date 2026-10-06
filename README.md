@@ -4,7 +4,10 @@ A small Next.js (App Router, TypeScript, Tailwind) app for learners to check the
 
 1. **Check the key is valid.**
 2. **See usage** in the left sidebar: a pie chart of credit used vs remaining, plus the credit limit, amount spent (USD), and spend for today / this week / this month. Usage loads automatically when a key is pasted.
-3. **Run a test call**: clicking the button lists the models available to the key (cheapest first, searchable). Picking one sends the prompt and shows the reply, token counts (prompt, completion, total) and the cost of that call.
+3. **Run a test call**: clicking the button lists the models available to the key: chat, embedding and transcription (speech-to-text, e.g. Whisper) models, cheapest first, searchable and filterable by type. Picking one runs a test and shows the result and the cost of that call:
+   - **Chat**: sends the prompt and shows the reply and token counts.
+   - **Embeddings**: embeds the prompt and shows the vector size and its first few values.
+   - **Transcription**: sends a bundled 4-second spoken clip (`public/sample-audio.wav`) and shows the transcript next to the expected text.
 
 ## Run locally
 
@@ -47,8 +50,8 @@ vercel --prod   # production deployment
 | Route | What it does |
 | --- | --- |
 | `POST /api/check-key` | Calls `GET https://openrouter.ai/api/v1/key` with the learner's key and returns usage and limit fields. |
-| `POST /api/models` | Calls `GET https://openrouter.ai/api/v1/models/user` with the learner's key and returns the text models that key can use, with prices. |
-| `POST /api/test-call` | Calls `POST https://openrouter.ai/api/v1/chat/completions` with `max_tokens: 50` and returns the reply, token counts and cost. |
+| `POST /api/models` | Calls `GET https://openrouter.ai/api/v1/models/user` with the learner's key and `output_modalities=text,embeddings,transcription` (OpenRouter returns only text models by default), and returns the models that key can use, with prices. |
+| `POST /api/test-call` | Depending on the model type, calls `POST /chat/completions` (with `max_tokens: 50`), `POST /embeddings` or `POST /audio/transcriptions` (with the sample clip), and returns the result, token counts and cost. |
 
 The browser calls these routes instead of OpenRouter directly, so learners don't hit CORS issues.
 
@@ -65,6 +68,7 @@ If you add logging or analytics later, make sure request bodies and headers for 
 - The model list comes from OpenRouter per key, so it reflects the account's provider, privacy and guardrail settings. Router models with variable pricing (such as `openrouter/auto`) are left out.
 - Learners can pick any listed model, including expensive ones. Prompts are capped at 200 characters and replies at 50 tokens, so even the most expensive model currently listed costs about 3 cents per test call; typical cheap models cost a tiny fraction of a cent.
 - Reasoning models may use all 50 tokens thinking and return an empty reply; the app says so when that happens.
+- Transcription tests only ever send the bundled 4-second clip, never user audio, so their cost is bounded by that clip. OpenRouter doesn't say whether a transcription model's listed price is per second or per token, so the list shows "Billed by audio" and the test result shows the actual cost.
 
 ### Why there is no "total tokens used"
 

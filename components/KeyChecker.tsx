@@ -6,11 +6,16 @@ import {
   MAX_PROMPT_LENGTH,
   MAX_TOKENS,
   MESSAGES,
+  MODEL_KINDS,
+  SAMPLE_AUDIO_SECONDS,
+  SAMPLE_AUDIO_TEXT,
+  SAMPLE_AUDIO_URL,
   validateKeyFormat,
   type ApiError,
   type CheckKeyResponse,
   type KeyInfo,
   type ModelInfo,
+  type ModelKind,
   type ModelsResponse,
   type TestCallResponse,
   type TestCallResult,
@@ -43,6 +48,26 @@ function formatPerMillion(pricePerToken: number): string {
   return `$${perMillion.toLocaleString("en-US", {
     maximumFractionDigits: perMillion < 1 ? 3 : 2,
   })}`;
+}
+
+const KIND_LABELS: Record<ModelKind, string> = {
+  chat: "Chat",
+  embedding: "Embeddings",
+  transcription: "Transcription",
+};
+
+function modelPrice(m: ModelInfo): string {
+  if (m.promptPrice === 0 && m.completionPrice === 0) return "Free";
+  switch (m.kind) {
+    case "chat":
+      return `${formatPerMillion(m.promptPrice)} / ${formatPerMillion(m.completionPrice)}`;
+    case "embedding":
+      return `${formatPerMillion(m.promptPrice)} input`;
+    case "transcription":
+      // OpenRouter doesn't say whether this is per second or per token, so
+      // don't guess; the test call reports the real cost.
+      return "Billed by audio";
+  }
 }
 
 function count(value: number | null): string {
@@ -151,9 +176,9 @@ export default function KeyChecker() {
     }
   }
 
-  async function runTestCall(model: string) {
+  async function runTestCall({ id: model, kind }: ModelInfo) {
     if (!checkInput(apiKey)) return;
-    if (!prompt.trim()) {
+    if (kind !== "transcription" && !prompt.trim()) {
       setTestResult(null);
       setTestError(MESSAGES.emptyPrompt);
       return;
@@ -163,6 +188,7 @@ export default function KeyChecker() {
     const res = await postJson<TestCallResponse>("/api/test-call", {
       key: apiKey.trim(),
       model,
+      kind,
       prompt: prompt.trim(),
     });
     setBusy(null);
@@ -265,7 +291,8 @@ export default function KeyChecker() {
         <p className="mt-3 text-xs text-subtle">
           Run Test Call lists the models available to your key. Pick one to send
           the prompt. Replies are capped at {MAX_TOKENS} tokens to keep the cost
-          tiny.
+          tiny. Embedding models embed the prompt; transcription models
+          transcribe a {SAMPLE_AUDIO_SECONDS}-second sample clip.
         </p>
       </section>
 
@@ -536,15 +563,24 @@ function ModelsCard({
   models: ModelInfo[];
   disabled: boolean;
   testingModel: string | null;
-  onPick: (model: string) => void;
+  onPick: (model: ModelInfo) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<ModelKind | "all">("all");
   const q = query.trim().toLowerCase();
-  const visible = q
-    ? models.filter(
-        (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q),
-      )
-    : models;
+  const visible = models.filter(
+    (m) =>
+      (kind === "all" || m.kind === kind) &&
+      (!q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)),
+  );
+  const tabs: { value: ModelKind | "all"; label: string; count: number }[] = [
+    { value: "all", label: "All", count: models.length },
+    ...MODEL_KINDS.map((k) => ({
+      value: k,
+      label: KIND_LABELS[k],
+      count: models.filter((m) => m.kind === k).length,
+    })).filter((t) => t.count > 0),
+  ];
 
   return (
     <section className={card}>
@@ -557,9 +593,29 @@ function ModelsCard({
         </p>
       </div>
       <p className="mt-1 text-sm text-muted">
-        Pick a model to run the test prompt. Prices are per 1M tokens (input /
-        output).
+        Pick a model to run the test. Chat prices are per 1M tokens (input /
+        output); embedding prices are per 1M input tokens.
       </p>
+
+      {tabs.length > 2 && (
+        <div role="group" aria-label="Filter by model type" className="mt-3 flex flex-wrap gap-2">
+          {tabs.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              aria-pressed={kind === t.value}
+              onClick={() => setKind(t.value)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                kind === t.value
+                  ? "border-brand bg-brand-tint text-brand-strong"
+                  : "border-line-strong text-muted hover:bg-soft"
+              }`}
+            >
+              {t.label} <span className="tabular-nums opacity-70">{t.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <input
         type="search"
@@ -575,17 +631,23 @@ function ModelsCard({
       ) : (
         <ul className="mt-3 max-h-96 divide-y divide-line overflow-y-auto rounded-lg border border-line">
           {visible.map((m) => {
-            const free = m.promptPrice === 0 && m.completionPrice === 0;
             return (
               <li key={m.id}>
                 <button
                   type="button"
                   disabled={disabled}
-                  onClick={() => onPick(m.id)}
+                  onClick={() => onPick(m)}
                   className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-soft disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{m.name}</span>
+                    <span className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium">{m.name}</span>
+                      {m.kind !== "chat" && (
+                        <span className="shrink-0 rounded bg-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                          {KIND_LABELS[m.kind]}
+                        </span>
+                      )}
+                    </span>
                     <span className="block truncate font-mono text-xs text-subtle">
                       {m.id}
                     </span>
@@ -593,9 +655,7 @@ function ModelsCard({
                   <span className="shrink-0 text-right text-xs tabular-nums text-muted">
                     {testingModel === m.id
                       ? "Calling…"
-                      : free
-                        ? "Free"
-                        : `${formatPerMillion(m.promptPrice)} / ${formatPerMillion(m.completionPrice)}`}
+                      : modelPrice(m)}
                   </span>
                 </button>
               </li>
@@ -627,32 +687,94 @@ function TestCallCard({
       {result && (
         <>
           <p className="mt-1 break-all font-mono text-xs text-subtle">{result.model}</p>
-          <blockquote className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-soft p-3 text-sm">
-            {result.reply || (
-              <span className="italic text-subtle">
-                The model returned an empty reply. Reasoning models can spend the
-                whole {MAX_TOKENS}-token test limit thinking; try another model.
-              </span>
-            )}
-          </blockquote>
-          {result.reply && result.finishReason === "length" && (
-            <p className="mt-2 text-xs text-subtle">
-              Reply was cut off at the {MAX_TOKENS}-token test limit.
-            </p>
-          )}
-          <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Prompt tokens" value={count(result.promptTokens)} />
-            <Stat label="Completion tokens" value={count(result.completionTokens)} />
-            <Stat label="Total tokens" value={count(result.totalTokens)} />
-            <Stat
-              label="Cost of call"
-              value={result.cost === null ? "n/a" : formatCallCost(result.cost)}
-            />
-          </dl>
+          {result.kind === "chat" && <ChatResult result={result} />}
+          {result.kind === "embedding" && <EmbeddingResult result={result} />}
+          {result.kind === "transcription" && <TranscriptionResult result={result} />}
         </>
       )}
     </section>
   );
+}
+
+function ChatResult({ result }: { result: TestCallResult }) {
+  return (
+    <>
+      <blockquote className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-soft p-3 text-sm">
+        {result.reply || (
+          <span className="italic text-subtle">
+            The model returned an empty reply. Reasoning models can spend the
+            whole {MAX_TOKENS}-token test limit thinking; try another model.
+          </span>
+        )}
+      </blockquote>
+      {result.reply && result.finishReason === "length" && (
+        <p className="mt-2 text-xs text-subtle">
+          Reply was cut off at the {MAX_TOKENS}-token test limit.
+        </p>
+      )}
+      <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="Prompt tokens" value={count(result.promptTokens)} />
+        <Stat label="Completion tokens" value={count(result.completionTokens)} />
+        <Stat label="Total tokens" value={count(result.totalTokens)} />
+        <CostStat cost={result.cost} />
+      </dl>
+    </>
+  );
+}
+
+function EmbeddingResult({ result }: { result: TestCallResult }) {
+  const preview = result.vectorPreview ?? [];
+  const more = result.dimensions !== null && result.dimensions > preview.length;
+  return (
+    <>
+      <p className="mt-3 text-sm">
+        Your prompt was turned into a vector of{" "}
+        <span className="font-semibold">{count(result.dimensions)}</span> numbers.
+        The first few:
+      </p>
+      <pre className="mt-2 overflow-x-auto rounded-lg bg-soft p-3 font-mono text-xs">
+        [{preview.map((v) => v.toFixed(5)).join(", ")}
+        {more ? ", …" : ""}]
+      </pre>
+      <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Stat label="Input tokens" value={count(result.promptTokens ?? result.totalTokens)} />
+        <Stat label="Dimensions" value={count(result.dimensions)} />
+        <CostStat cost={result.cost} />
+      </dl>
+    </>
+  );
+}
+
+function TranscriptionResult({ result }: { result: TestCallResult }) {
+  return (
+    <>
+      <div className="mt-3 rounded-lg border border-line p-3">
+        <p className="text-xs text-subtle">Sample clip sent</p>
+        <audio controls preload="none" src={SAMPLE_AUDIO_URL} className="mt-2 w-full" />
+        <p className="mt-2 text-xs text-subtle">
+          It says: &ldquo;{SAMPLE_AUDIO_TEXT}&rdquo;
+        </p>
+      </div>
+      <p className="mt-3 text-xs text-subtle">Transcript</p>
+      <blockquote className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-soft p-3 text-sm">
+        {result.reply || (
+          <span className="italic text-subtle">The model returned an empty transcript.</span>
+        )}
+      </blockquote>
+      <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Stat
+          label="Audio billed"
+          value={result.audioSeconds === null ? "n/a" : `${result.audioSeconds} s`}
+        />
+        <Stat label="Total tokens" value={count(result.totalTokens)} />
+        <CostStat cost={result.cost} />
+      </dl>
+    </>
+  );
+}
+
+function CostStat({ cost }: { cost: number | null }) {
+  return <Stat label="Cost of call" value={cost === null ? "n/a" : formatCallCost(cost)} />;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
