@@ -141,7 +141,7 @@ export default function KeyChecker() {
     applyKeyResponse(res);
   }
 
-  // Pasting a complete key loads its usage straight away.
+  // Pasting a complete key checks it straight away.
   function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
     const pasted = e.clipboardData.getData("text").trim();
     if (busy !== null || validateKeyFormat(pasted) !== null) return;
@@ -211,8 +211,8 @@ export default function KeyChecker() {
   const disabled = busy !== null;
 
   return (
-    <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[20rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr]">
-      <section className={`${card} lg:col-start-2 lg:row-start-1`}>
+    <div className="flex flex-col gap-5">
+      <section className={card}>
         <label htmlFor="api-key" className={labelClass}>
           OpenRouter API key
         </label>
@@ -277,7 +277,7 @@ export default function KeyChecker() {
             disabled={disabled}
             className="rounded-md bg-linear-to-r from-brand-strong to-brand-mid px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busy === "check" ? "Checking…" : "Check Usage"}
+            {busy === "check" ? "Checking…" : "Check Key"}
           </button>
           <button
             type="button"
@@ -296,14 +296,7 @@ export default function KeyChecker() {
         </p>
       </section>
 
-      <aside className="lg:sticky lg:top-6 lg:col-start-1 lg:row-span-2 lg:row-start-1">
-        <UsageSidebar info={keyInfo} loading={busy === "check" || (busy === "models" && !keyInfo)} />
-      </aside>
-
-      <div
-        aria-live="polite"
-        className="flex min-w-0 flex-col gap-5 lg:col-start-2 lg:row-start-2"
-      >
+      <div aria-live="polite" className="flex min-w-0 flex-col gap-5">
         {status && <StatusCard status={status} label={keyInfo?.label ?? null} />}
         {(testResult || testError) && (
           <TestCallCard result={testResult} error={testError} />
@@ -341,216 +334,6 @@ function StatusCard({ status, label }: { status: Status; label: string | null })
         <p className="mt-1 break-all font-mono text-xs opacity-80">{label}</p>
       )}
     </section>
-  );
-}
-
-// Pie geometry: a thick ring drawn with stroke dashes on a 100x100 viewBox.
-const PIE_RADIUS = 32;
-const PIE_CIRCUMFERENCE = 2 * Math.PI * PIE_RADIUS;
-const PIE_GAP = 1.5;
-
-function UsagePie({
-  fraction,
-  centerTop,
-  centerBottom,
-  usedLabel,
-  remainingLabel,
-}: {
-  /** Share of the limit used, 0..1, or null when there is nothing to split. */
-  fraction: number | null;
-  centerTop: string;
-  centerBottom: string;
-  usedLabel?: string;
-  remainingLabel?: string;
-}) {
-  const used = (fraction ?? 0) * PIE_CIRCUMFERENCE;
-  const gap = fraction !== null && fraction > 0 && fraction < 1 ? PIE_GAP : 0;
-  const ring = {
-    cx: 50,
-    cy: 50,
-    r: PIE_RADIUS,
-    fill: "none",
-    strokeWidth: 22,
-  };
-
-  return (
-    <svg
-      viewBox="0 0 100 100"
-      role="img"
-      aria-label={
-        fraction === null
-          ? `Usage pie chart: ${centerTop} ${centerBottom}`
-          : `Usage pie chart: ${usedLabel}, ${remainingLabel}`
-      }
-      className="mx-auto h-44 w-44"
-    >
-      <g transform="rotate(-90 50 50)">
-        {fraction === null ? (
-          <circle {...ring} className="stroke-brand-tint-strong" />
-        ) : (
-          <>
-            <circle
-              {...ring}
-              className="stroke-brand-tint-strong"
-              strokeDasharray={`${Math.max(0, PIE_CIRCUMFERENCE - used - gap)} ${PIE_CIRCUMFERENCE}`}
-              strokeDashoffset={-used}
-            >
-              <title>{remainingLabel}</title>
-            </circle>
-            <circle
-              {...ring}
-              className="stroke-brand"
-              strokeDasharray={`${Math.max(0, used - gap)} ${PIE_CIRCUMFERENCE}`}
-            >
-              <title>{usedLabel}</title>
-            </circle>
-          </>
-        )}
-      </g>
-      <text
-        x="50"
-        y="49"
-        textAnchor="middle"
-        className="fill-ink text-[9px] font-semibold"
-      >
-        {centerTop}
-      </text>
-      <text x="50" y="58" textAnchor="middle" className="fill-subtle text-[6px]">
-        {centerBottom}
-      </text>
-    </svg>
-  );
-}
-
-function UsageSidebar({ info, loading }: { info: KeyInfo | null; loading: boolean }) {
-  if (!info) {
-    return (
-      <section className={card}>
-        <h2 className={heading}>Usage</h2>
-        <div className="mt-4">
-          <UsagePie fraction={null} centerTop="–" centerBottom="no data yet" />
-        </div>
-        <p className="mt-4 text-center text-sm text-muted">
-          {loading
-            ? "Loading usage…"
-            : "Paste your key to see how much of its credit has been used."}
-        </p>
-      </section>
-    );
-  }
-
-  const hasLimit = info.limit !== null;
-  // For keys whose limit resets, limit_remaining reflects the current period,
-  // so prefer it over lifetime usage when splitting the pie.
-  const usedOfLimit = hasLimit
-    ? Math.max(
-        0,
-        info.limitRemaining !== null ? info.limit! - info.limitRemaining : info.usage,
-      )
-    : 0;
-  const remaining = hasLimit
-    ? Math.max(0, info.limitRemaining ?? info.limit! - info.usage)
-    : 0;
-  const fraction = hasLimit
-    ? info.limit! > 0
-      ? Math.min(1, usedOfLimit / info.limit!)
-      : 1
-    : null;
-  const percent = (fraction ?? 0) * 100;
-  const percentText = `${percent.toFixed(percent > 0 && percent < 10 ? 1 : 0)}%`;
-
-  const periods = [
-    { label: "Today", value: info.usageDaily },
-    { label: "This week", value: info.usageWeekly },
-    { label: "This month", value: info.usageMonthly },
-  ].filter((p): p is { label: string; value: number } => p.value !== null);
-
-  return (
-    <section className={card}>
-      <h2 className={heading}>Usage</h2>
-      {info.label && (
-        <p className="mt-1 break-all font-mono text-xs text-subtle">{info.label}</p>
-      )}
-
-      <div className="mt-4">
-        {hasLimit ? (
-          <UsagePie
-            fraction={fraction}
-            centerTop={percentText}
-            centerBottom="of limit used"
-            usedLabel={`Used ${usd.format(usedOfLimit)} (${percentText})`}
-            remainingLabel={`Remaining ${usd.format(remaining)}`}
-          />
-        ) : (
-          <UsagePie fraction={null} centerTop="No limit" centerBottom="on this key" />
-        )}
-      </div>
-
-      {hasLimit ? (
-        <ul className="mt-4 space-y-2 text-sm">
-          <LegendRow
-            swatch="bg-brand"
-            label="Used"
-            value={usd.format(usedOfLimit)}
-          />
-          <LegendRow
-            swatch="bg-brand-tint-strong"
-            label="Remaining"
-            value={usd.format(remaining)}
-          />
-        </ul>
-      ) : (
-        <p className="mt-4 text-center text-sm text-muted">
-          This key has no credit limit, so there is nothing to split into used
-          and remaining.
-        </p>
-      )}
-
-      <dl className="mt-4 divide-y divide-line border-t border-line text-sm">
-        <Row label="Credit limit" value={hasLimit ? usd.format(info.limit!) : "No limit"} />
-        <Row label="Spent (all time)" value={usd.format(info.usage)} />
-        {periods.map((p) => (
-          <Row key={p.label} label={`Spent ${p.label.toLowerCase()}`} value={usd.format(p.value)} />
-        ))}
-      </dl>
-
-      {info.limitReset && (
-        <p className="mt-3 text-xs text-subtle">
-          This limit resets {info.limitReset}; the chart shows the current
-          period. Periods use UTC.
-        </p>
-      )}
-      {info.expiresAt && (
-        <p className="mt-3 text-xs text-subtle">
-          Key expires on {new Date(info.expiresAt).toLocaleDateString()}.
-        </p>
-      )}
-
-      <p className="mt-4 rounded-lg bg-soft p-3 text-xs text-muted">
-        <span className="font-semibold">Total tokens used:</span> OpenRouter
-        reports a key&apos;s lifetime usage in dollars, not tokens. Token counts
-        are shown per test call.
-      </p>
-    </section>
-  );
-}
-
-function LegendRow({ swatch, label, value }: { swatch: string; label: string; value: string }) {
-  return (
-    <li className="flex items-center gap-2">
-      <span aria-hidden className={`h-3 w-3 shrink-0 rounded-sm ${swatch}`} />
-      <span className="text-muted">{label}</span>
-      <span className="ml-auto font-semibold tabular-nums">{value}</span>
-    </li>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 py-2">
-      <dt className="text-muted">{label}</dt>
-      <dd className="font-semibold tabular-nums">{value}</dd>
-    </div>
   );
 }
 

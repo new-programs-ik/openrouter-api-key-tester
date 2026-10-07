@@ -22,8 +22,8 @@ export default function Home() {
               <span className="font-bold">OpenRouter</span> Key Tester
             </h1>
             <p className="mx-auto mt-3 max-w-2xl text-sm text-muted sm:text-base">
-              Paste your OpenRouter API key to check that it works, see how much
-              credit you have used, and run a quick test call.
+              Paste your OpenRouter API key to check that it works and run a quick
+              test call.
             </p>
           </div>
           <KeyChecker />
